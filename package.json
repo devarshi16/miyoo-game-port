@@ -1,0 +1,22 @@
+{
+  "name": "miyoo-game-port",
+  "version": "1.0.0",
+  "description": "Agent skill for reverse engineering, shimming, and recompiling 2D games for the Miyoo Mini Plus on OnionOS",
+  "author": "Devarshi",
+  "license": "MIT",
+  "keywords": [
+    "miyoo-mini",
+    "miyoo-mini-plus",
+    "onionos",
+    "game-port",
+    "clean-room",
+    "recompilation",
+    "reverse-engineering",
+    "rea",
+    "antigravity-skill"
+  ],
+  "scripts": {
+    "triage": "python3 scripts/triage_game.py",
+    "pack": "python3 scripts/pack_assets.py"
+  }
+}
