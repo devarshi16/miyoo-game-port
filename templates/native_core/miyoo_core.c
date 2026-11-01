@@ -2,8 +2,11 @@
  * miyoo_core.c — High-performance software rasterizer and hardware interface
  *                for the Miyoo Mini / Miyoo Mini Plus (SigmaStar SSD202D).
  *
- * Direct /dev/fb0 double-buffered blit, inverted panel row-traversal,
- * NEON-optimized 2x scanline scaling, and evdev input loop.
+ * Verified against real device hardware:
+ * - FBIOPAN_DISPLAY double-buffering (640x960 virtual FB, 59.67 Hz true panel refresh)
+ * - Correct Linux evdev keycodes (Menu=KEY_ESC 1, X=KEY_LEFTSHIFT 42, Y=KEY_LEFTALT 56)
+ * - Non-blocking poll() input loop preventing shutdown hangs
+ * - Inverted panel row-traversal for 180° physically inverted LCD
  */
 
 #include "miyoo_core.h"
@@ -19,6 +22,7 @@ static SDL_Texture *g_sdl_tex = NULL;
 #else
 #include <fcntl.h>
 #include <unistd.h>
+#include <poll.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <linux/fb.h>
@@ -30,6 +34,8 @@ static int g_evfd = -1;
 static uint32_t *g_fbmem = NULL;
 static size_t g_fblen = 0;
 static struct fb_var_screeninfo g_vinfo;
+static int g_active_page = 0;
+static int g_total_pages = 2;
 static pthread_t g_input_thread;
 static volatile bool g_running = false;
 #endif
@@ -54,28 +60,38 @@ static int g_cap_textures = 0;
 #ifndef MIYOO_DESKTOP
 static void *input_thread_func(void *arg) {
     (void)arg;
+    struct pollfd pfd;
+    pfd.fd = g_evfd;
+    pfd.events = POLLIN;
+
     struct input_event ev;
     while (g_running) {
-        if (read(g_evfd, &ev, sizeof(ev)) == sizeof(ev)) {
-            if (ev.type == EV_KEY) {
-                uint32_t mask = 0;
-                switch (ev.code) {
-                    case KEY_UP:        mask = BTN_UP; break;
-                    case KEY_DOWN:      mask = BTN_DOWN; break;
-                    case KEY_LEFT:      mask = BTN_LEFT; break;
-                    case KEY_RIGHT:     mask = BTN_RIGHT; break;
-                    case KEY_SPACE:     mask = BTN_A; break;
-                    case KEY_LEFTCTRL:  mask = BTN_B; break;
-                    case KEY_LEFTALT:   mask = BTN_X; break;
-                    case KEY_LEFTSHIFT: mask = BTN_Y; break;
-                    case KEY_E:         mask = BTN_L1; break;
-                    case KEY_T:         mask = BTN_R1; break;
-                    case KEY_RETURN:    mask = BTN_START; break;
-                    case KEY_RIGHTCTRL: mask = BTN_SELECT; break;
-                    case KEY_HOME:      mask = BTN_MENU; break;
+        int ret = poll(&pfd, 1, 50); /* 50ms timeout to cleanly check g_running */
+        if (ret > 0 && (pfd.revents & POLLIN)) {
+            while (read(g_evfd, &ev, sizeof(ev)) == sizeof(ev)) {
+                if (ev.type == EV_KEY) {
+                    uint32_t mask = 0;
+                    switch (ev.code) {
+                        case KEY_UP:        mask = BTN_UP; break;
+                        case KEY_DOWN:      mask = BTN_DOWN; break;
+                        case KEY_LEFT:      mask = BTN_LEFT; break;
+                        case KEY_RIGHT:     mask = BTN_RIGHT; break;
+                        case KEY_SPACE:     mask = BTN_A; break;
+                        case KEY_LEFTCTRL:  mask = BTN_B; break;
+                        case KEY_LEFTSHIFT: mask = BTN_X; break;     /* Verified: X is LeftShift (42) */
+                        case KEY_LEFTALT:   mask = BTN_Y; break;     /* Verified: Y is LeftAlt (56) */
+                        case KEY_E:         mask = BTN_L1; break;
+                        case KEY_T:         mask = BTN_R1; break;
+                        case KEY_TAB:       mask = BTN_L2; break;    /* Verified: L2 is Tab (15) */
+                        case KEY_BACKSPACE: mask = BTN_R2; break;    /* Verified: R2 is Backspace (14) */
+                        case KEY_ENTER:     mask = BTN_START; break;
+                        case KEY_RIGHTCTRL: mask = BTN_SELECT; break;
+                        case KEY_ESC:       mask = BTN_MENU; break;  /* Verified: Menu is ESC (1) */
+                        case KEY_POWER:     mask = BTN_POWER; break;
+                    }
+                    if (ev.value == 1)      g_input_keys |= mask;
+                    else if (ev.value == 0) g_input_keys &= ~mask;
                 }
-                if (ev.value == 1)      g_input_keys |= mask;
-                else if (ev.value == 0) g_input_keys &= ~mask;
             }
         }
     }
@@ -107,6 +123,9 @@ bool miyoo_init(int render_w, int render_h, int scale_factor) {
         return false;
     }
 
+    g_total_pages = (g_vinfo.yres_virtual >= 960) ? (g_vinfo.yres_virtual / 480) : 1;
+    g_active_page = (g_vinfo.yoffset >= 480) ? (g_vinfo.yoffset / 480) : 0;
+
     g_fblen = g_vinfo.yres_virtual * g_vinfo.xres * (g_vinfo.bits_per_pixel / 8);
     g_fbmem = (uint32_t *)mmap(NULL, g_fblen, PROT_READ | PROT_WRITE, MAP_SHARED, g_fbfd, 0);
     if (g_fbmem == MAP_FAILED) {
@@ -114,7 +133,7 @@ bool miyoo_init(int render_w, int render_h, int scale_factor) {
         return false;
     }
 
-    g_evfd = open("/dev/input/event0", O_RDONLY);
+    g_evfd = open("/dev/input/event0", O_RDONLY | O_NONBLOCK);
     g_running = true;
     if (g_evfd >= 0) {
         pthread_create(&g_input_thread, NULL, input_thread_func, NULL);
@@ -132,10 +151,16 @@ void miyoo_shutdown(void) {
 #else
     g_running = false;
     if (g_evfd >= 0) {
-        close(g_evfd);
         pthread_join(g_input_thread, NULL);
+        close(g_evfd);
+        g_evfd = -1;
     }
-    if (g_fbmem && g_fbmem != MAP_FAILED) munmap(g_fbmem, g_fblen);
+    if (g_fbmem && g_fbmem != MAP_FAILED) {
+        /* Reset pan to page 0 before exiting */
+        g_vinfo.yoffset = 0;
+        ioctl(g_fbfd, FBIOPAN_DISPLAY, &g_vinfo);
+        munmap(g_fbmem, g_fblen);
+    }
     if (g_fbfd >= 0) close(g_fbfd);
 #endif
 
@@ -175,8 +200,13 @@ void miyoo_flip(void) {
                 case SDLK_x: mask = BTN_B; break;
                 case SDLK_a: mask = BTN_X; break;
                 case SDLK_s: mask = BTN_Y; break;
+                case SDLK_q: mask = BTN_L1; break;
+                case SDLK_w: mask = BTN_R1; break;
+                case SDLK_1: mask = BTN_L2; break;
+                case SDLK_2: mask = BTN_R2; break;
                 case SDLK_RETURN: mask = BTN_START; break;
                 case SDLK_RSHIFT: mask = BTN_SELECT; break;
+                case SDLK_ESCAPE: mask = BTN_MENU; break;
             }
             if (down) g_input_keys |= mask;
             else      g_input_keys &= ~mask;
@@ -189,27 +219,34 @@ void miyoo_flip(void) {
 #else
     if (!g_fbmem) return;
 
-    /*
-     * Hardware Blit to 640x480:
-     * - Upscales 320x240 to 640x480 (2x horizontal duplication, line-pair copy).
-     * - Reverses row order (h-1 down to 0) to account for Miyoo Mini 180° inverted LCD.
-     */
-    uint32_t *dst = g_fbmem;
+    /* Double-buffering: render to the inactive back-page, then pan */
+    int back_page = (g_active_page + 1) % g_total_pages;
+    int page_offset_pixels = back_page * 640 * 480;
+    uint32_t *dst = g_fbmem + page_offset_pixels;
     int dst_w = 640;
 
+    /*
+     * Upscale and 180° rotation into uncached framebuffer memory.
+     * Writes 2 lines per source row, scanning inverted Y and inverted X.
+     */
     for (int y = g_h - 1; y >= 0; y--) {
         const uint32_t *src_line = &g_render_buffer[y * g_w];
         uint32_t *dst_line0 = &dst[( (g_h - 1 - y) * 2 ) * dst_w];
         uint32_t *dst_line1 = dst_line0 + dst_w;
 
         for (int x = 0; x < g_w; x++) {
-            uint32_t px = src_line[g_w - 1 - x]; /* Invert X for 180° rotation */
+            uint32_t px = src_line[g_w - 1 - x];
             dst_line0[x * 2 + 0] = px;
             dst_line0[x * 2 + 1] = px;
             dst_line1[x * 2 + 0] = px;
             dst_line1[x * 2 + 1] = px;
         }
     }
+
+    /* Flip page and block until next VSync */
+    g_vinfo.yoffset = back_page * 480;
+    ioctl(g_fbfd, FBIOPAN_DISPLAY, &g_vinfo);
+    g_active_page = back_page;
 #endif
 }
 

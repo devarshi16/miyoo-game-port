@@ -21,9 +21,12 @@ extern "C" {
 #define BTN_Y       (1 << 7)
 #define BTN_L1      (1 << 8)
 #define BTN_R1      (1 << 9)
-#define BTN_START   (1 << 10)
-#define BTN_SELECT  (1 << 11)
-#define BTN_MENU    (1 << 12)
+#define BTN_L2      (1 << 10)
+#define BTN_R2      (1 << 11)
+#define BTN_START   (1 << 12)
+#define BTN_SELECT  (1 << 13)
+#define BTN_MENU    (1 << 14)
+#define BTN_POWER   (1 << 15)
 
 /* Core lifecycle */
 MIYOO_API bool     miyoo_init(int render_w, int render_h, int scale_factor);
