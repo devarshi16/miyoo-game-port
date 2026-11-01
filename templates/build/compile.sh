@@ -56,7 +56,14 @@ cp "$EXE" "$GAME/game_executable"
 cp "$SKILL_ROOT/templates/onionos/launch.sh" "$GAME/launch.sh"
 cat > "$STAGE/Roms/PORTS/Shortcuts/$CATEGORY/$NAME.port" <<EOF
 #!/bin/sh
-/mnt/SDCARD/Emu/PORTS/launch_standalone.sh "$NAME" "$DIR" "launch.sh" "" "game.pack" "0" "0"
+GameName="$NAME"
+GameDir="$DIR"
+GameExecutable="launch.sh"
+GameDataFile="game.pack"
+KillAudioserver=0
+PerformanceMode=0
+Arguments=""
+/mnt/SDCARD/Emu/PORTS/launch_standalone.sh "\$GameName" "\$GameDir" "\$GameExecutable" "\$Arguments" "\$GameDataFile" "\$KillAudioserver" "\$PerformanceMode"
 EOF
 chmod +x "$GAME/launch.sh" "$GAME/game_executable" "$STAGE/Roms/PORTS/Shortcuts/$CATEGORY/$NAME.port"
 mkdir -p "$OUT"
