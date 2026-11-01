@@ -23,7 +23,7 @@ try:
 except ImportError:
     HAS_PIL = False
 
-def convert_fb_to_png(raw_path, out_path, width=640, height=480, y_offset=0, bpp=32, rotate_180=True):
+def convert_fb_to_png(raw_path, out_path, width=640, height=480, y_offset=0, bpp=32, rotate_180=True, stride=None):
     if not HAS_PIL:
         print("Error: Pillow is required. Install via: pip install Pillow")
         sys.exit(1)
@@ -34,8 +34,11 @@ def convert_fb_to_png(raw_path, out_path, width=640, height=480, y_offset=0, bpp
         sys.exit(1)
 
     bytes_per_pixel = bpp // 8
-    frame_size = width * height * bytes_per_pixel
-    start_byte = y_offset * width * bytes_per_pixel
+    stride = stride or width * bytes_per_pixel
+    if stride < width * bytes_per_pixel:
+        raise ValueError("Stride is smaller than a visible row")
+    frame_size = stride * height
+    start_byte = y_offset * stride
 
     with open(raw_file, "rb") as f:
         f.seek(start_byte)
@@ -46,9 +49,9 @@ def convert_fb_to_png(raw_path, out_path, width=640, height=480, y_offset=0, bpp
 
     if bpp == 32:
         # ARGB / BGRA format commonly emitted by SigmaStar fb0
-        img = Image.frombytes("RGBA", (width, height), data, "raw", "BGRA")
+        img = Image.frombytes("RGBA", (width, height), data, "raw", "BGRA", stride)
     elif bpp == 16:
-        img = Image.frombytes("RGB", (width, height), data, "raw", "BGR;16")
+        img = Image.frombytes("RGB", (width, height), data, "raw", "BGR;16", stride)
     else:
         print(f"Unsupported bpp: {bpp}")
         sys.exit(1)
@@ -68,10 +71,11 @@ def main():
     parser.add_argument("--height", type=int, default=480, help="Screen height (default: 480)")
     parser.add_argument("--yoffset", type=int, default=0, help="Active Y pan offset from /sys/class/graphics/fb0/pan")
     parser.add_argument("--bpp", type=int, default=32, help="Bits per pixel (default: 32)")
+    parser.add_argument("--stride", type=int, default=None, help="Framebuffer line_length in bytes")
     parser.add_argument("--no-rotate", action="store_true", help="Do not apply 180° rotation")
     args = parser.parse_args()
 
-    convert_fb_to_png(args.input, args.output, args.width, args.height, args.yoffset, args.bpp, not args.no_rotate)
+    convert_fb_to_png(args.input, args.output, args.width, args.height, args.yoffset, args.bpp, not args.no_rotate, args.stride)
 
 if __name__ == "__main__":
     main()

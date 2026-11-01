@@ -1,167 +1,120 @@
 #!/usr/bin/env python3
+"""Pack already extracted images/data into MPAK v1. A game-specific runtime reader is required.
+
+Indexed images preserve exact RGBA colors, with RGBA32 fallback above 256 colors.
+This helper does not unpack proprietary game containers or transcode audio.
 """
-pack_assets.py — High-efficiency linear asset pack builder for 128MB RAM targets.
-
-Takes raw extracted assets (PNGs, WAVs, text/data files) and compiles them into
-a single, contiguous binary blob with an O(1) seek table.
-
-Supports:
-- 8-bit indexed palette sprites (1 byte per pixel + 256*4 RGBA palette): 75% RAM savings.
-- 16-bit RGB565 / RGBA4444: 50% RAM savings.
-- Raw PCM / streaming audio markers.
-
-Usage:
-    python3 pack_assets.py --input <asset_dir> --output game.pack [--format indexed8|rgba32|rgb565]
-"""
-
-import os
-import sys
-import struct
 import argparse
+import os
 from pathlib import Path
+import struct
+import tempfile
+from PIL import Image
 
-try:
-    from PIL import Image
-    HAS_PIL = True
-except ImportError:
-    HAS_PIL = False
-
-MAGIC = b"MPAK"
+MAGIC = b'MPAK'
 VERSION = 1
-
 TYPE_SPRITE_RGBA32 = 1
 TYPE_SPRITE_INDEXED8 = 2
-TYPE_SPRITE_RGB565 = 3
-TYPE_AUDIO_PCM = 10
 TYPE_GENERIC_DATA = 20
 
+
 def quantize_indexed8(img):
-    """Convert RGBA image to 8-bit indexed palette with alpha transparency preserved."""
-    if img.mode != "RGBA":
-        img = img.convert("RGBA")
-    
-    # Quantize to 256 colors with adaptive palette
-    # Split alpha to preserve binary or transparent masking
-    r, g, b, a = img.split()
-    rgb = Image.merge("RGB", (r, g, b))
-    quant = rgb.quantize(colors=255, method=Image.Quantize.MEDIANCUT)
-    
-    pal = quant.getpalette()  # 768 entries (256 * 3)
-    pal_rgba = bytearray(256 * 4)
-    for i in range(255):
-        pal_rgba[i*4 + 0] = pal[i*3 + 0]
-        pal_rgba[i*4 + 1] = pal[i*3 + 1]
-        pal_rgba[i*4 + 2] = pal[i*3 + 2]
-        pal_rgba[i*4 + 3] = 255
-    # Color 255 is reserved as transparent
-    pal_rgba[255*4 + 0] = 0
-    pal_rgba[255*4 + 1] = 0
-    pal_rgba[255*4 + 2] = 0
-    pal_rgba[255*4 + 3] = 0
+    rgba = img.convert('RGBA')
+    raw = rgba.tobytes()
+    lookup, palette, indices = {}, bytearray(1024), bytearray()
+    for pos in range(0, len(raw), 4):
+        color = raw[pos:pos + 4]
+        index = lookup.get(color)
+        if index is None:
+            if len(lookup) == 256:
+                return None, None
+            index = len(lookup)
+            lookup[color] = index
+            palette[index * 4:index * 4 + 4] = color
+        indices.append(index)
+    return indices, palette
 
-    idx_data = bytearray(quant.tobytes())
-    a_data = a.tobytes()
-    for i in range(len(idx_data)):
-        if a_data[i] < 128:
-            idx_data[i] = 255
 
-    return idx_data, pal_rgba
-
-def pack_assets(input_dir, output_file, fmt_mode="indexed8"):
-    if not HAS_PIL:
-        print("Error: Pillow (PIL) is required. Install via: pip install Pillow")
-        sys.exit(1)
-
-    in_path = Path(input_dir)
+def pack_assets(input_dir, output_file, fmt_mode='indexed8'):
+    source = Path(input_dir)
+    destination = Path(output_file)
+    if not source.is_dir():
+        raise ValueError('Extracted asset directory does not exist')
+    if fmt_mode not in ('indexed8', 'rgba32'):
+        raise ValueError('Unsupported image format')
+    destination.parent.mkdir(parents=True, exist_ok=True)
     entries = []
-    data_buffer = bytearray()
+    opaque = [f for f in source.rglob('*') if f.is_file() and
+              (f.suffix.lower() in ('.assets', '.ress', '.resource', '.pck', '.win', '.unx', '.xnb', '.unity3d') or
+               f.name in ('globalgamemanagers', 'GameAssembly.dll', 'UnityPlayer.dll'))]
+    if opaque:
+        raise ValueError('Input still contains raw game containers; extract them before packing: ' + ', '.join(f.name for f in opaque[:5]))
+    # Spool on disk so all assets need not coexist as Python byte arrays.
+    with tempfile.TemporaryFile() as spool:
+        for f in sorted(source.rglob('*')):
+            if not f.is_file() or f.resolve() == destination.resolve():
+                continue
+            name = f.relative_to(source).as_posix()
+            if len(name.encode('utf-8')) > 127:
+                raise ValueError('MPAK v1 name exceeds 127 UTF-8 bytes: ' + name)
+            offset = spool.tell()
+            ext = f.suffix.lower()
+            w = h = 0
+            if ext in ('.png', '.jpg', '.jpeg', '.bmp'):
+                with Image.open(f) as image:
+                    w, h = image.size
+                    if not (0 < w < 65536 and 0 < h < 65536):
+                        raise ValueError('MPAK v1 dimensions out of range: ' + name)
+                    pixels, palette = quantize_indexed8(image) if fmt_mode == 'indexed8' else (None, None)
+                    if pixels is None:
+                        kind = TYPE_SPRITE_RGBA32
+                        spool.write(image.convert('RGBA').tobytes())
+                    else:
+                        kind = TYPE_SPRITE_INDEXED8
+                        spool.write(palette); spool.write(pixels)
+            elif ext in ('.wav', '.ogg', '.mp3', '.json', '.xml', '.txt', '.bin', '.dat'):
+                kind = TYPE_GENERIC_DATA  # WAV retains its container header; it is not raw PCM.
+                with f.open('rb') as inp:
+                    for block in iter(lambda: inp.read(1024 * 1024), b''):
+                        spool.write(block)
+            else:
+                continue
+            length = spool.tell() - offset
+            if not length:
+                raise ValueError('Empty asset: ' + name)
+            if spool.tell() >= 2**32:
+                raise ValueError('MPAK v1 payload exceeds 32-bit offsets')
+            entries.append((name, kind, w, h, offset, length))
+        if not entries:
+            raise ValueError('No extracted assets found. Proprietary containers must be extracted first.')
+        table = b''.join(struct.pack('<128sHHHHII', n.encode().ljust(128, b'\0'), t, w, h, 0, off, length)
+                         for n, t, w, h, off, length in entries)
+        with tempfile.NamedTemporaryFile(dir=destination.parent, prefix='.mpak-', delete=False) as out:
+            temporary = Path(out.name)
+            try:
+                out.write(struct.pack('<4sIII', MAGIC, VERSION, len(entries), 16 + len(table)))
+                out.write(table)
+                spool.seek(0)
+                for block in iter(lambda: spool.read(1024 * 1024), b''):
+                    out.write(block)
+                out.close()
+                os.replace(temporary, destination)
+            finally:
+                temporary.unlink(missing_ok=True)
+    print('Packed %d extracted assets: %s' % (len(entries), destination))
 
-    print(f"[*] Scanning {input_dir}...")
-    files = sorted(list(in_path.rglob("*")))
-
-    for f in files:
-        if not f.is_file():
-            continue
-        rel_name = f.relative_to(in_path).as_posix()
-        ext = f.suffix.lower()
-
-        if ext in (".png", ".jpg", ".jpeg", ".bmp"):
-            with Image.open(f) as img:
-                w, h = img.size
-                if fmt_mode == "indexed8":
-                    pixels, palette = quantize_indexed8(img)
-                    offset = len(data_buffer)
-                    # Payload: 1024 bytes palette followed by w*h pixels
-                    data_buffer.extend(palette)
-                    data_buffer.extend(pixels)
-                    length = len(palette) + len(pixels)
-                    entries.append({
-                        "name": rel_name,
-                        "type": TYPE_SPRITE_INDEXED8,
-                        "w": w,
-                        "h": h,
-                        "offset": offset,
-                        "length": length
-                    })
-                elif fmt_mode == "rgba32":
-                    img_rgba = img.convert("RGBA")
-                    raw = img_rgba.tobytes()
-                    offset = len(data_buffer)
-                    data_buffer.extend(raw)
-                    length = len(raw)
-                    entries.append({
-                        "name": rel_name,
-                        "type": TYPE_SPRITE_RGBA32,
-                        "w": w,
-                        "h": h,
-                        "offset": offset,
-                        "length": length
-                    })
-        elif ext in (".wav", ".ogg", ".mp3", ".json", ".xml", ".txt", ".bin", ".dat"):
-            with open(f, "rb") as rf:
-                raw = rf.read()
-            offset = len(data_buffer)
-            data_buffer.extend(raw)
-            entries.append({
-                "name": rel_name,
-                "type": TYPE_AUDIO_PCM if ext == ".wav" else TYPE_GENERIC_DATA,
-                "w": 0,
-                "h": 0,
-                "offset": offset,
-                "length": len(raw)
-            })
-
-    print(f"[*] Writing package: {output_file} ({len(entries)} items)...")
-    with open(output_file, "wb") as out:
-        # Header: MAGIC (4B), Version (4B), EntryCount (4B), DataOffset (4B)
-        entry_table = bytearray()
-        for e in entries:
-            name_bytes = e["name"].encode("utf-8")[:127]
-            # Name fixed 128 bytes, type 2B, w 2B, h 2B, offset 4B, length 4B
-            padded_name = name_bytes.ljust(128, b"\0")
-            entry_table.extend(struct.pack("<128sHHHHII", padded_name, e["type"], e["w"], e["h"], 0, e["offset"], e["length"]))
-
-        header_len = 16
-        table_len = len(entry_table)
-        data_start_offset = header_len + table_len
-
-        header = struct.pack("<4sIII", MAGIC, VERSION, len(entries), data_start_offset)
-        out.write(header)
-        out.write(entry_table)
-        out.write(data_buffer)
-
-    total_mb = (header_len + table_len + len(data_buffer)) / (1024 * 1024)
-    print(f"[+] Successfully built {output_file}: {total_mb:.2f} MB.")
 
 def main():
-    parser = argparse.ArgumentParser(description="Pack assets for Miyoo Mini low-memory target.")
-    parser.add_argument("--input", "-i", required=True, help="Input assets directory")
-    parser.add_argument("--output", "-o", default="game.pack", help="Output pack file")
-    parser.add_argument("--format", "-f", choices=["indexed8", "rgba32"], default="indexed8",
-                        help="Texture format (indexed8 recommended for 128MB RAM)")
-    args = parser.parse_args()
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument('--input', '-i', required=True)
+    ap.add_argument('--output', '-o', default='game.pack')
+    ap.add_argument('--format', '-f', choices=['indexed8', 'rgba32'], default='indexed8')
+    args = ap.parse_args()
+    try:
+        pack_assets(args.input, args.output, args.format)
+    except (OSError, ValueError) as error:
+        ap.exit(1, 'Packing failed: ' + str(error) + '\n')
 
-    pack_assets(args.input, args.output, args.format)
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

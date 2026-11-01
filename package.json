@@ -1,6 +1,6 @@
 {
   "name": "miyoo-game-port",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Agent skill for reverse engineering, shimming, and recompiling 2D games for the Miyoo Mini Plus on OnionOS",
   "author": "Devarshi",
   "license": "MIT",

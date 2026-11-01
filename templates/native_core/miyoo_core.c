@@ -2,7 +2,7 @@
  * miyoo_core.c — High-performance software rasterizer and hardware interface
  *                for the Miyoo Mini / Miyoo Mini Plus (SigmaStar SSD202D).
  *
- * Verified against real device hardware:
+ * Integration scaffold; validate the chosen backend on the target hardware:
  * - FBIOPAN_DISPLAY double-buffering (640x960 virtual FB, 59.67 Hz true panel refresh)
  * - Correct Linux evdev keycodes (Menu=KEY_ESC 1, X=KEY_LEFTSHIFT 42, Y=KEY_LEFTALT 56)
  * - Non-blocking poll() input loop preventing shutdown hangs
@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdatomic.h>
 
 #ifdef MIYOO_DESKTOP
 #include <SDL2/SDL.h>
@@ -33,14 +34,16 @@ static int g_fbfd = -1;
 static int g_evfd = -1;
 static uint32_t *g_fbmem = NULL;
 static size_t g_fblen = 0;
-static struct fb_var_screeninfo g_vinfo;
+static struct fb_var_screeninfo g_vinfo, g_original_vinfo;
+static struct fb_fix_screeninfo g_finfo;
+static bool g_input_started;
 static int g_active_page = 0;
 static int g_total_pages = 2;
 static pthread_t g_input_thread;
-static volatile bool g_running = false;
+static atomic_bool g_running = false;
 #endif
 
-static volatile uint32_t g_input_keys = 0;
+static atomic_uint g_input_keys = 0;
 static int g_w = 320;
 static int g_h = 240;
 static int g_scale = 2;
@@ -89,8 +92,8 @@ static void *input_thread_func(void *arg) {
                         case KEY_ESC:       mask = BTN_MENU; break;  /* Verified: Menu is ESC (1) */
                         case KEY_POWER:     mask = BTN_POWER; break;
                     }
-                    if (ev.value == 1)      g_input_keys |= mask;
-                    else if (ev.value == 0) g_input_keys &= ~mask;
+                    if (ev.value == 1)      atomic_fetch_or(&g_input_keys, mask);
+                    else if (ev.value == 0) atomic_fetch_and(&g_input_keys, ~mask);
                 }
             }
         }
@@ -100,6 +103,11 @@ static void *input_thread_func(void *arg) {
 #endif
 
 bool miyoo_init(int render_w, int render_h, int scale_factor) {
+    if (render_w <= 0 || render_h <= 0 || render_w > 4096 || render_h > 4096 || scale_factor < 1 || scale_factor > 4) return false;
+#ifndef MIYOO_DESKTOP
+    if (render_w != 320 || render_h != 240 || scale_factor != 2) return false;
+#endif
+    atomic_store(&g_input_keys, 0);
     g_w = render_w;
     g_h = render_h;
     g_scale = scale_factor;
@@ -109,34 +117,43 @@ bool miyoo_init(int render_w, int render_h, int scale_factor) {
     memset(g_render_buffer, 0, g_w * g_h * sizeof(uint32_t));
 
 #ifdef MIYOO_DESKTOP
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) < 0) return false;
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) < 0) { miyoo_shutdown(); return false; }
     g_win = SDL_CreateWindow("Miyoo Mini Core Preview", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
                              g_w * g_scale, g_h * g_scale, SDL_WINDOW_SHOWN);
     g_ren = SDL_CreateRenderer(g_win, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
-    g_sdl_tex = SDL_CreateTexture(g_ren, SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_STREAMING, g_w, g_h);
+    if (!g_win || !g_ren) { miyoo_shutdown(); return false; }
+    g_sdl_tex = SDL_CreateTexture(g_ren, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING, g_w, g_h);
+    if (!g_sdl_tex) { miyoo_shutdown(); return false; }
 #else
     g_fbfd = open("/dev/fb0", O_RDWR);
-    if (g_fbfd < 0) return false;
+    if (g_fbfd < 0) { miyoo_shutdown(); return false; }
 
-    if (ioctl(g_fbfd, FBIOGET_VSCREENINFO, &g_vinfo) < 0) {
-        close(g_fbfd);
-        return false;
+    if (ioctl(g_fbfd, FBIOGET_VSCREENINFO, &g_vinfo) < 0 ||
+        ioctl(g_fbfd, FBIOGET_FSCREENINFO, &g_finfo) < 0) {
+        miyoo_shutdown(); return false;
     }
-
-    g_total_pages = (g_vinfo.yres_virtual >= 960) ? (g_vinfo.yres_virtual / 480) : 1;
-    g_active_page = (g_vinfo.yoffset >= 480) ? (g_vinfo.yoffset / 480) : 0;
-
-    g_fblen = g_vinfo.yres_virtual * g_vinfo.xres * (g_vinfo.bits_per_pixel / 8);
+    g_original_vinfo = g_vinfo;
+    if (g_vinfo.xres != 640 || g_vinfo.yres != 480 || g_vinfo.bits_per_pixel != 32 ||
+        g_vinfo.xoffset || g_vinfo.yres_virtual < 480 || g_finfo.line_length < 640 * 4 ||
+        g_finfo.line_length % 4 || g_vinfo.red.length != 8 || g_vinfo.green.length != 8 ||
+        g_vinfo.blue.length != 8 || g_vinfo.red.offset > 24 || g_vinfo.green.offset > 24 ||
+        g_vinfo.blue.offset > 24 || g_vinfo.red.msb_right || g_vinfo.green.msb_right ||
+        g_vinfo.blue.msb_right || (g_vinfo.transp.length && (g_vinfo.transp.length != 8 || g_vinfo.transp.offset > 24))) {
+        fprintf(stderr, "Unsupported framebuffer layout; expected 640x480 32-bit mode\n");
+        miyoo_shutdown(); return false;
+    }
+    g_total_pages = g_vinfo.yres_virtual / g_vinfo.yres;
+    g_active_page = g_vinfo.yoffset / g_vinfo.yres;
+    g_fblen = (size_t)g_finfo.line_length * g_vinfo.yres_virtual;
+    if (g_fblen > g_finfo.smem_len) { miyoo_shutdown(); return false; }
     g_fbmem = (uint32_t *)mmap(NULL, g_fblen, PROT_READ | PROT_WRITE, MAP_SHARED, g_fbfd, 0);
-    if (g_fbmem == MAP_FAILED) {
-        close(g_fbfd);
-        return false;
-    }
+    if (g_fbmem == MAP_FAILED) { g_fbmem = NULL; miyoo_shutdown(); return false; }
 
     g_evfd = open("/dev/input/event0", O_RDONLY | O_NONBLOCK);
     g_running = true;
     if (g_evfd >= 0) {
-        pthread_create(&g_input_thread, NULL, input_thread_func, NULL);
+        if (pthread_create(&g_input_thread, NULL, input_thread_func, NULL) != 0) { miyoo_shutdown(); return false; }
+        g_input_started = true;
     }
 #endif
     return true;
@@ -148,20 +165,20 @@ void miyoo_shutdown(void) {
     if (g_ren) SDL_DestroyRenderer(g_ren);
     if (g_win) SDL_DestroyWindow(g_win);
     SDL_Quit();
+    g_sdl_tex = NULL; g_ren = NULL; g_win = NULL;
 #else
     g_running = false;
+    if (g_input_started) { pthread_join(g_input_thread, NULL); g_input_started = false; }
     if (g_evfd >= 0) {
-        pthread_join(g_input_thread, NULL);
         close(g_evfd);
         g_evfd = -1;
     }
     if (g_fbmem && g_fbmem != MAP_FAILED) {
-        /* Reset pan to page 0 before exiting */
-        g_vinfo.yoffset = 0;
-        ioctl(g_fbfd, FBIOPAN_DISPLAY, &g_vinfo);
+        ioctl(g_fbfd, FBIOPAN_DISPLAY, &g_original_vinfo);
         munmap(g_fbmem, g_fblen);
     }
     if (g_fbfd >= 0) close(g_fbfd);
+    g_fbfd = -1; g_fbmem = NULL;
 #endif
 
     if (g_render_buffer) {
@@ -173,6 +190,7 @@ void miyoo_shutdown(void) {
         miyoo_tex_destroy(i);
     }
     if (g_textures) free(g_textures);
+    g_textures = NULL; g_num_textures = g_cap_textures = 0;
 }
 
 void miyoo_clear(uint32_t argb_color) {
@@ -208,8 +226,8 @@ void miyoo_flip(void) {
                 case SDLK_RSHIFT: mask = BTN_SELECT; break;
                 case SDLK_ESCAPE: mask = BTN_MENU; break;
             }
-            if (down) g_input_keys |= mask;
-            else      g_input_keys &= ~mask;
+            if (down) atomic_fetch_or(&g_input_keys, mask);
+            else      atomic_fetch_and(&g_input_keys, ~mask);
         }
     }
     SDL_UpdateTexture(g_sdl_tex, NULL, g_render_buffer, g_w * sizeof(uint32_t));
@@ -221,9 +239,8 @@ void miyoo_flip(void) {
 
     /* Double-buffering: render to the inactive back-page, then pan */
     int back_page = (g_active_page + 1) % g_total_pages;
-    int page_offset_pixels = back_page * 640 * 480;
-    uint32_t *dst = g_fbmem + page_offset_pixels;
-    int dst_w = 640;
+    uint32_t *dst = (uint32_t *)((uint8_t *)g_fbmem + (size_t)back_page * g_vinfo.yres * g_finfo.line_length);
+    int dst_w = g_finfo.line_length / 4;
 
     /*
      * Upscale and 180° rotation into uncached framebuffer memory.
@@ -235,7 +252,11 @@ void miyoo_flip(void) {
         uint32_t *dst_line1 = dst_line0 + dst_w;
 
         for (int x = 0; x < g_w; x++) {
-            uint32_t px = src_line[g_w - 1 - x];
+            uint32_t color = src_line[g_w - 1 - x];
+            uint32_t px = ((color & 255u) << g_vinfo.red.offset) |
+                (((color >> 8) & 255u) << g_vinfo.green.offset) |
+                (((color >> 16) & 255u) << g_vinfo.blue.offset) |
+                (g_vinfo.transp.length == 8 ? 255u << g_vinfo.transp.offset : 0u);
             dst_line0[x * 2 + 0] = px;
             dst_line0[x * 2 + 1] = px;
             dst_line1[x * 2 + 0] = px;
@@ -245,42 +266,50 @@ void miyoo_flip(void) {
 
     /* Flip page and block until next VSync */
     g_vinfo.yoffset = back_page * 480;
-    ioctl(g_fbfd, FBIOPAN_DISPLAY, &g_vinfo);
-    g_active_page = back_page;
+    if (ioctl(g_fbfd, FBIOPAN_DISPLAY, &g_vinfo) == 0) g_active_page = back_page;
 #endif
 }
 
 uint32_t miyoo_get_input(void) {
-    return g_input_keys;
+    return atomic_load(&g_input_keys);
 }
 
 int miyoo_tex_create_rgba(int w, int h, const uint32_t *pixels) {
     if (g_num_textures >= g_cap_textures) {
-        g_cap_textures = g_cap_textures ? g_cap_textures * 2 : 64;
-        g_textures = (Texture *)realloc(g_textures, g_cap_textures * sizeof(Texture));
+        int capacity = g_cap_textures ? g_cap_textures * 2 : 64;
+        Texture *resized = (Texture *)realloc(g_textures, capacity * sizeof(Texture));
+        if (!resized) return -1;
+        g_textures = resized; g_cap_textures = capacity;
     }
+    if (w <= 0 || h <= 0 || w > 65535 || h > 65535) return -1;
     int id = g_num_textures++;
     g_textures[id].w = w;
     g_textures[id].h = h;
     g_textures[id].idx = NULL;
     g_textures[id].pal = NULL;
-    g_textures[id].px = (uint32_t *)malloc(w * h * sizeof(uint32_t));
-    memcpy(g_textures[id].px, pixels, w * h * sizeof(uint32_t));
+    g_textures[id].px = (uint32_t *)malloc((size_t)w * h * sizeof(uint32_t));
+    if (!g_textures[id].px) { g_num_textures--; return -1; }
+    memcpy(g_textures[id].px, pixels, (size_t)w * h * sizeof(uint32_t));
     return id;
 }
 
 int miyoo_tex_create_indexed8(int w, int h, const uint8_t *indices, const uint32_t *palette_rgba) {
     if (g_num_textures >= g_cap_textures) {
-        g_cap_textures = g_cap_textures ? g_cap_textures * 2 : 64;
-        g_textures = (Texture *)realloc(g_textures, g_cap_textures * sizeof(Texture));
+        int capacity = g_cap_textures ? g_cap_textures * 2 : 64;
+        Texture *resized = (Texture *)realloc(g_textures, capacity * sizeof(Texture));
+        if (!resized) return -1;
+        g_textures = resized; g_cap_textures = capacity;
     }
+    if (w <= 0 || h <= 0 || w > 65535 || h > 65535) return -1;
     int id = g_num_textures++;
     g_textures[id].w = w;
     g_textures[id].h = h;
     g_textures[id].px = NULL;
-    g_textures[id].idx = (uint8_t *)malloc(w * h);
-    memcpy(g_textures[id].idx, indices, w * h);
+    g_textures[id].idx = (uint8_t *)malloc((size_t)w * h);
+    if (!g_textures[id].idx) { g_num_textures--; return -1; }
+    memcpy(g_textures[id].idx, indices, (size_t)w * h);
     g_textures[id].pal = (uint32_t *)malloc(256 * sizeof(uint32_t));
+    if (!g_textures[id].pal) { free(g_textures[id].idx); g_num_textures--; return -1; }
     memcpy(g_textures[id].pal, palette_rgba, 256 * sizeof(uint32_t));
     return id;
 }
@@ -303,6 +332,7 @@ void miyoo_draw_sprite(int tex_id, int dx, int dy, int sx, int sy, int sw, int s
     int tb = (tint_rgba >> 16) & 0xFF;
     int ta = (tint_rgba >> 24) & 0xFF;
     bool has_tint = (tint_rgba != 0xFFFFFFFF);
+    if (!t->px && !t->idx) return;
 
     for (int y = 0; y < sh; y++) {
         int target_y = dy + y;
@@ -323,14 +353,14 @@ void miyoo_draw_sprite(int tex_id, int dx, int dy, int sx, int sy, int sw, int s
             if (a == 0) continue; /* Fully transparent */
 
             if (has_tint) {
-                int r = (((src_px) & 0xFF) * tr) >> 8;
-                int g = (((src_px >> 8) & 0xFF) * tg) >> 8;
-                int b = (((src_px >> 16) & 0xFF) * tb) >> 8;
-                a = (a * ta) >> 8;
+                int r = (((src_px) & 0xFF) * tr) / 255;
+                int g = (((src_px >> 8) & 0xFF) * tg) / 255;
+                int b = (((src_px >> 16) & 0xFF) * tb) / 255;
+                a = (a * ta) / 255;
                 src_px = (a << 24) | (b << 16) | (g << 8) | r;
             }
 
-            if (a >= 250) {
+            if (a == 255) {
                 g_render_buffer[target_y * g_w + target_x] = src_px;
             } else {
                 /* Alpha blend */
@@ -343,9 +373,9 @@ void miyoo_draw_sprite(int tex_id, int dx, int dy, int sx, int sy, int sw, int s
                 int sg = (src_px >> 8) & 0xFF;
                 int sb = (src_px >> 16) & 0xFF;
 
-                int out_r = (sr * a + dr * inv_a) >> 8;
-                int out_g = (sg * a + dg * inv_a) >> 8;
-                int out_b = (sb * a + db * inv_a) >> 8;
+                int out_r = (sr * a + dr * inv_a) / 255;
+                int out_g = (sg * a + dg * inv_a) / 255;
+                int out_b = (sb * a + db * inv_a) / 255;
                 g_render_buffer[target_y * g_w + target_x] = (255 << 24) | (out_b << 16) | (out_g << 8) | out_r;
             }
         }

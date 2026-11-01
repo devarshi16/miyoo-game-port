@@ -1,171 +1,47 @@
 ---
 name: miyoo-game-port
-description: Architect, reverse engineer, and recompile PC/console 2D and retro software 3D games for the Miyoo Mini and Miyoo Mini Plus (OnionOS / SigmaStar SSD202D Cortex-A7). Specializes in clean-room engine shimming, 40-50MB RAM budget enforcement, double-buffered hardware blitting to /dev/fb0, linear asset packing, and pairing with the Reverse Engineer Anything (REA) MCP tool.
+description: Assess and develop game ports for Miyoo Mini and Mini Plus on OnionOS, including engine compatibility, asset conversion, native rendering, packaging and hardware validation. Use for an actual porting or port-audit task; this skill is scaffolding, not an automatic converter or a guarantee that a game is portable.
 metadata:
-  version: "1.1.0"
-  engines: ["unity", "monogame", "xna", "fna", "gamemaker", "godot", "custom-c-cpp", "retro-software-3d"]
+  version: "1.2.0"
   platform: "miyoo-mini-plus"
   os: "onionos"
 ---
 
-# Miyoo Mini Game Port Architect
+# Miyoo game port development
 
-A specialized skill for porting commercial and indie games to the **Miyoo Mini** and **Miyoo Mini Plus** running OnionOS.
+Preserve the user's game, device and output requirements. Distinguish engine signatures, working implementations, measured results and hypotheses. Existing source ports and compatible runtimes may be preferable to replacing an engine. REA is optional: use available binary/metadata tools rather than assuming a particular MCP is installed.
 
-Designed to operate in tandem with **REA (Reverse Engineer Anything)** for binary extraction, decompilation, and call-graph analysis.
+## Establish feasibility
 
----
+Run `scripts/triage_game.py <game-directory>` as an inventory. It does not establish engine version, 2D/3D requirements, decoded asset memory, source availability or runtime cost. Packed assets remain unknown until inspected. Do not assign transferability percentages or declare feasibility from compressed file sizes.
 
-## 1. Device Constraints & Hardware Profile (Field Verified)
+Record exact game build fingerprints, engine/API requirements, required native dependencies and licensing/provenance. For Unity, distinguish Mono IL from IL2CPP; finding a Managed directory alone is insufficient. Shader, physics, UI, input, serialization and lifecycle semantics can be gameplay-critical even in a visually simple game. Consult [engine strategies](references/engine_matrix.md) for bounded research options.
 
-Every architectural decision on the Miyoo Mini / Plus is dictated by the **SigmaStar SSD202D** SoC and OnionOS:
+## Probe the target
 
-| Subsystem | Hardware Reality | Porting Implication |
-| :--- | :--- | :--- |
-| **CPU** | Dual-core ARM Cortex-A7 @ 1.2 GHz | 32-bit `armhf` (`armv7-a`, VFPv4-d16, NEON). Single-core IPC is low. Second core provides ~1.45× scaling (ideal for splitting screen rendering or background physics). |
-| **RAM** | **128 MB DDR3 Total** (~103 MB user-space) | Kernel + MMA buffers carve out ~25 MB (`MemTotal` ~103 MB). Under Onion's MainUI, **only ~5–15 MB is free**. **Target process memory budget is <= 40–50 MB RSS**. Exceeding ~75 MB triggers Linux OOM killer. |
-| **GPU** | **NONE** (No 3D GPU, No OpenGL ES, No Vulkan) | All rendering must be done via CPU software rasterization into `/dev/fb0`, or hardware accelerated via the SigmaStar 2D engine (`MI_GFX` / `libssgfx.so`). |
-| **Display** | 640×480 IPS LCD (Rotated 180° on hardware) | **True refresh is 59.67 Hz** (16.76 ms). The kernel claims 75 Hz in `fb_var_screeninfo`—that value is wrong. Virtual FB is $640 \times 960$ (2 pages) flipped via `FBIOPAN_DISPLAY`. Memory is **uncached**; never read from `/dev/fb0`. |
-| **Audio** | OnionOS `audioserver` / `/dev/dsp` | `/dev/mi_ao` is owned by `audioserver`. Write 16-bit stereo PCM (44.1/48 kHz) to `/dev/dsp` via `libpadsp.so` or via audioserver's FIFO pipes (`/tmp/audio_fifo_server`). **Never kill audioserver**. Retry write loops on `EINTR`. |
-| **Input** | Linux `evdev` (`/dev/input/event0`) | Menu is `KEY_ESC` (1). X is `KEY_LEFTSHIFT` (42). Y is `KEY_LEFTALT` (56). L2 is `KEY_TAB` (15). R2 is `KEY_BACKSPACE` (14). Input thread must use non-blocking `poll()` to prevent shutdown hangs. |
-| **Storage** | MicroSD formatted as FAT32 | Mounted with `dirsync`; each file creation costs ~15 ms. Always pack game assets into single linear files (`game.pack` or `.tar`). |
+Read [hardware guidance](references/hardware_specs.md) before device integration. Inspect the actual Onion version, MemAvailable/swap, framebuffer fixed/variable info, pixel bitfields, active page, audio ownership, input mapping and dynamic ABI requirements. Historical measurements describe one workload/device, not universal limits.
 
----
+The native template supports **320×240 RGBA rendering → 640×480, 32-bit framebuffer, 2× rotation/scaling**. It validates that mode, uses the reported stride and restores the original pan. It is a starting backend without an audio implementation, pack reader or game runtime. Other modes need an explicit backend; fail clearly rather than writing an assumed layout.
 
-## 2. The Clean-Room Recompilation Pattern (CRRHB)
+Choose either Onion audio service/OSS integration or a deliberately managed direct-MI backend. Match initialization, ownership and cleanup. Do not blindly kill audioserver or blindly leave it running with a competing direct backend. Restore the platform on exit and test a subsequently launched application.
 
-Because desktop engines require hundreds of megabytes of RAM and desktop/GLES graphics APIs, porting to the Miyoo Mini **does not port the original engine**.
+## Implement and verify
 
-Instead, this skill implements the **Clean-Room Recompilation & Hardware Blit (CRRHB)** pattern:
+1. Prototype one real game slice before broadening a compatibility claim. Stub generation supplies declarations and throwing placeholders, not working engine semantics. `scripts/gen_shim.py` and `scripts/api_surface.py` are Unity-oriented helpers; the generated throwing code uses `KNL.Log.Missing`, supplied by `templates/managed/StubLog.cs`. Both two-stage inspection helpers are included. Adapt the reference-assembly selection for another game/framework.
+2. Extract owned data with a game/build-specific importer. `scripts/pack_assets.py` consumes **already extracted** images and generic files; it cannot unpack `.assets`, `.pck`, `.win`, `.xnb` or game DLLs. Indexed output preserves exact RGBA palettes up to 256 colors and falls back to RGBA32 above that. Do not silently discard partial alpha. Its MPAK format requires a reader in the game's runtime.
+3. Separate developer cross-compilation from player setup. Make device versus desktop output explicit. The build template requires an existing ARM game executable; it does not generate one. `templates/build/compile.sh --desktop` builds only the preview core. For device staging, follow that script's usage and supply its required executable, names and extracted assets.
+4. Keep source assets out of distributable archives. Validate required data/DLLs, source fingerprints, conversion counts, pack bounds and output checksums. Use fresh work directories and staged installation with rollback; preserve saves. Success means output validation passed, not merely a zero exit status from one subprocess.
+5. Add focused behavioral regressions for reproduced failures. Unity-style adapters need tests for coroutine phases/cancellation, effective activation, hierarchy/component cache invalidation, input edges, game/unscaled/wall clocks, save round trips and orderly exit. A zero-exception boot or visually correct screenshot does not prove gameplay equivalence.
+6. Build a versioned candidate from a clean checkout, recording source commit, toolchain and dependency versions, hashes and third-party notices. Test the **extracted release package** using the player route, not only the developer's SD directory.
 
-```mermaid
-flowchart TD
-    subgraph OriginalGame["Original Game Package (BYOD)"]
-        BIN["Game Binaries / Bytecode\n(C#, GML, GDScript, C++)"]
-        DAT["Original Assets\n(AssetBundles, .pck, .win, .xnb)"]
-    end
+## Device QA and performance
 
-    subgraph REA["REA Analysis Layer"]
-        DECOMP["Decompile / Inspect\n(ilspy, ghidra, Hopper, jadx)"]
-        GRAPH["API Surface Delta\n(Extracted Call Graph)"]
-    end
+Use an isolated test port and copied or fresh saves. Check the current state before launching; preserve services and settings used during QA and restore changes afterward. Standard Onion directory layout is `Roms/PORTS/Shortcuts/<Category>/<name>.port` plus `Roms/PORTS/Games/<dir>/`. A shortcut must reference real executable/data paths.
 
-    subgraph PortPipeline["Porting & Compilation Pipeline"]
-        SHIM["Clean-Room Engine Shim\n(Mock UnityEngine / FNA / Runner)"]
-        PACK["Linear Asset Packer\n(pack_assets.py: 8-bit Indexed Palette)"]
-        CORE["Native C Core\n(miyoo_core.c: Double-Buffered /dev/fb0)"]
-    end
+For screenshots, `scripts/raw_to_png.py` requires the actual dimensions, bit depth, stride and visible pan offset; rotate as appropriate. Reading a framebuffer for an occasional screenshot is different from reading uncached video memory in the render loop.
 
-    subgraph MiyooDevice["Miyoo Mini Plus (OnionOS)"]
-        RUN["Runtime App (<45MB RAM)"]
-        FB["/dev/fb0 (640x960 @ 59.67 Hz)"]
-        AUDIO["audioserver / /dev/dsp (48kHz S16)"]
-    end
+Measure logic, rasterization, copy/conversion, vsync, allocations, total RSS and swap separately with fixed input/workloads. MI_GFX may accelerate presentation, but does not automatically accelerate the software renderer. Compare stock clocks before considering optional tuning. Do not promise an FPS gain before a device benchmark.
 
-    BIN --> DECOMP
-    DECOMP --> GRAPH
-    GRAPH --> SHIM
-    DAT --> PACK
-    SHIM --> RUN
-    PACK --> RUN
-    CORE --> RUN
-    RUN --> FB
-    RUN --> AUDIO
-```
+On-device source compilation is a separate toolchain/resource question from first-run asset conversion. A PC converter's peak memory does not prove every importer is impossible. For copy-paste installation research, prototype incremental metadata, texture and audio conversion with a measured memory budget, progress reporting and recovery after interruption; report unimplemented steps honestly.
 
----
-
-## 3. Engine Compatibility & 3D Feasibility
-
-| Engine / Genre | Bytecode / Source Form | Porting Strategy | Transferability | Memory Risk |
-| :--- | :--- | :--- | :--- | :--- |
-| **Unity (Old 2D / 4.x - 2017)** | C# ECMA-335 IL (`Assembly-CSharp.dll`) | Hand-written `UnityEngine` shim + `gen_shim.py` stub layer + `miyoo_core.c` blitter. Run under ARM `mono-sgen`. | **95%** | Medium (GC allocation churn). |
-| **MonoGame / XNA / FNA** | C# ECMA-335 IL | Provide clean-room `Microsoft.Xna.Framework.dll` shim. Route `SpriteBatch.Draw()` directly to `miyoo_core.c`. | **95%** | Low (XNA API is lightweight). |
-| **GameMaker Studio (1.4 / 2.x)** | Bytecode (`data.win` / `game.unx`) | Decompile GML via REA to C++/C# or run via lightweight runner targeting `miyoo_core.c`. | **85%** | Low (Sprites fit in 8-bit palette). |
-| **Custom C / C++ 2D Engines** | Native x86/ARM ELF or C/C++ source | Recompile with `arm-linux-gnueabihf-gcc`, replace OpenGL/SDL blit with `miyoo_core.c` double-buffered pan. | **90%** | Very Low (Native memory control). |
-| **Retro Software 3D (Quake, PS1-era)** | C/C++ software rasterizer | Multi-core horizontal split (Core 0 top, Core 1 bottom). *TyrQuake* runs natively at 640×480 @ 60 FPS. | **85%** | Low to Moderate. |
-| **Godot Engine 2D (3.x / 4.x)** | GDScript / C# / GDExtension | Compile custom minimal Godot ARMHF binary with 3D/physics disabled and `/dev/fb0` software rasterizer. | **75%** | High (Engine baseline memory). |
-| **Modern 3D (Unreal, Unity 2021+ 3D)** | Native C++ / IL2CPP with shaders | **INCOMPATIBLE**. Hardware lacks 3D GPU. Software programmable shaders drop below 5 FPS. | **0%** | Extreme (>200MB baseline). |
-
----
-
-## 4. OnionOS File & Directory Layout
-
-To appear correctly in Onion's menu and pass the `import.log` validation, ports must strictly follow this structure:
-
-```
-/mnt/SDCARD/Roms/PORTS/
-├── Shortcuts/
-│   └── <Category>/
-│       └── <GameName>.port       # Shortcut script invoking launch_standalone.sh
-├── Games/
-│   └── <GameDir>/
-│       ├── launch.sh             # Main game entry script
-│       ├── game_executable       # ARMHF binary
-│       ├── libmiyoo_core.so      # Blitter core
-│       └── game.pack             # Indexed asset package
-└── Imgs/
-    └── <GameName>.png            # 250x360 or 640x480 menu thumbnail
-```
-
----
-
-## 5. Phase-by-Phase Workflow
-
-### Phase 1: REA Triage & Static Feasibility Assessment
-1. **Detect Engine**: Use REA or `scripts/triage_game.py` to identify whether the target uses portable IL (Mono C#), GML bytecode, or native C++.
-2. **Execute Feasibility Check**:
-   ```bash
-   python3 scripts/triage_game.py /path/to/game_directory
-   ```
-   If textures exceed 35 MB uncompressed, 8-bit palette indexing is mandatory.
-
-### Phase 2: Asset Decoupling & Linear Packing
-1. Extract raw PNG textures, OGG/WAV sound clips, and level JSONs using REA.
-2. Run `scripts/pack_assets.py` to build a single linear binary package (`game.pack`):
-   - **Sprites**: Convert to 8-bit indexed palette (RGBA palette + indexed pixel buffer).
-   - **Audio**: Format as S16 stereo 44.1 kHz or 48 kHz.
-   - **Seek Table**: Flat offset/length seek table for $O(1)$ zero-alloc reads.
-
-### Phase 3: Clean-Room Engine Shim Generation
-1. Use `scripts/gen_shim.py` alongside REA call-graph dumps to generate missing API declarations:
-   ```bash
-   python3 scripts/gen_shim.py <GameDir>/Managed generated_stubs.cs --hand ./engine/HandWritten
-   ```
-2. Compile dynamic `.so` libraries targeting **glibc <= 2.28** and using `-fsigned-char`.
-
-### Phase 4: Native ARM Cortex-A7 Core (`miyoo_core.c`)
-Integrate the high-performance C rendering core:
-1. Memory-map `/dev/fb0` across all virtual pages ($640 \times 960$).
-2. Double-buffering via `ioctl(fbfd, FBIOPAN_DISPLAY, &vinfo)`.
-3. Inverted row-traversal to handle the 180° physically mounted LCD.
-4. Non-blocking `poll()` input thread handling all 14 physical buttons.
-
-### Phase 5: Headless SSH Verification & QA
-1. **Prevent SSH Disconnect**:
-   Starting a port normally kills background network daemons. Before running headless QA, touch the keep-alive flag:
-   ```bash
-   ssh root@<miyoo_ip> "touch /mnt/SDCARD/.tmp_update/config/.keepServicesAlive"
-   ```
-2. **Execute via Onion's Command Queue**:
-   ```bash
-   ssh root@<miyoo_ip> "echo 'cd /mnt/SDCARD/Roms/PORTS/Games/<GameDir> && ./launch.sh' > /tmp/cmd_to_run.sh && killall MainUI"
-   ```
-3. **Capture Accurate Screenshot**:
-   ```bash
-   ssh root@<miyoo_ip> "PAN=\$(cat /sys/class/graphics/fb0/pan | cut -d',' -f2); cat /dev/fb0 > /tmp/fb.raw; echo \$PAN"
-   scp root@<miyoo_ip>:/tmp/fb.raw ./fb.raw
-   python3 scripts/raw_to_png.py fb.raw screenshot.png --yoffset <PAN_OFFSET>
-   ```
-
----
-
-## 6. Golden Rules for Miyoo Mini Porting
-
-1. **Memory Budget is <= 45 MB RSS**: Kernel and MMA carveouts reduce usable RAM from 128 MB down to ~103 MB, with MainUI leaving only ~5–15 MB free before swap.
-2. **Never Read from `/dev/fb0`**: The framebuffer mapping is uncached. Reads incur heavy bus penalties.
-3. **Always Double-Buffer with `FBIOPAN_DISPLAY`**: Writing to a single page causes severe tearing or writes to an inactive background page.
-4. **Never Kill `audioserver`**: Output audio through `/dev/dsp` via `libpadsp.so` or write to audioserver's FIFO pipes.
-5. **Panel Refresh is 59.67 Hz**: Disregard the 75 Hz kernel mode string.
-6. **Input Keycodes**: Menu is `KEY_ESC` (1), X is `KEY_LEFTSHIFT` (42), Y is `KEY_LEFTALT` (56).
-7. **BYOD Compliance**: Distribute only the clean-room engine shim, launcher scripts, and converters. Never bundle proprietary game assets.
+Before calling a release stable, verify tutorial/progression, menu navigation, upgrades, repeated save/load, long sessions and clean return to Onion with subsequent audio/video working. Keep untested items visible and avoid recommending purchases based only on a prototype.
