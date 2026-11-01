@@ -25,3 +25,9 @@ Onion's audio service can provide an OSS/FIFO route. A direct MI_AO port may del
 Use Onion's shortcut/category layout and verify GameExecutable/GameDataFile exist. SD FAT32 has no normal POSIX symlinks/permissions; transfer real files and pack bulk assets. The observed card used `dirsync`. Runtime HOME must be writable. Compatible dynamic libraries must stay within the target libc symbol ABI (the audited target used glibc 2.28); a recent host compiler may introduce newer requirements.
 
 Do not casually change CPU governor, network-service retention flags, audio ownership or MainUI. If QA requires a reversible change, record and restore its prior state. Use isolated test ports/saves. Read the actual visible page and stride for screenshots; framebuffer reads belong outside performance-critical loops.
+
+## Performance evidence
+
+Measure managed/game logic, command collection, raster drawing, framebuffer conversion and blocking pan separately. Compare identical saves, scenes, input, CPU mode and audio settings; record actual wall-clock FPS with profiling disabled. A fixed simulation timestep is useful for controlled comparisons but does not establish real-time gameplay performance. Preserve the original physics frequency when optimizing, and identify any intentional simulation slowdown separately.
+
+For software rendering, benchmark repeated palette shading, off-screen shading and vertical gradients before assuming final framebuffer blitting dominates. Cache only when every relevant shader parameter is in the key. Verify optimized pixels against scalar reference paths, including translucent palettes, recolor thresholds, flipped/clipped sprites and UI fades. A native frame replay is useful for separating renderer cost from game-logic cost; captures contain owned game pixels and must not be published.

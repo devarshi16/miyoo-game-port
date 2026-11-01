@@ -11,3 +11,5 @@
 | Software 3D | Existing software renderer or a carefully bounded port | Workload measurements; lack of a 3D GPU is not proof that all 3D is impossible. |
 
 There are no validated cross-engine transferability percentages. Inspect original containers and native code before judging feasibility; do not substitute disk size for working-set memory. Lower resolution, palette indexing, streaming and MI_GFX are options to benchmark, not mandatory solutions for every title.
+
+A visually small physics approximation can change progression. In Kingdom's pouch, replacing thin coin polygons with bounding circles changed lip contacts, stacking and real coin loss. Preserve original serialized outlines, layer masks, damping, gravity, mass and spawn/overflow logic; do not invent a wallet-capacity clamp to conceal a solver defect. Test concave openings, thin rotated polygons, collision owner identity, pooled bodies and natural overflow. A compatible third-party solver remains a compatibility implementation, not evidence of bit-identical behavior to a closed-source engine. Pin its version, preserve its license and verify target ABI requirements.
