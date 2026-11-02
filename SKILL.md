@@ -2,7 +2,7 @@
 name: miyoo-game-port
 description: Assess and develop game ports for Miyoo Mini and Mini Plus on OnionOS, including engine compatibility, asset conversion, native rendering, packaging and hardware validation. Use for an actual porting or port-audit task; this skill is scaffolding, not an automatic converter or a guarantee that a game is portable.
 metadata:
-  version: "1.2.1"
+  version: "1.2.2"
   platform: "miyoo-mini-plus"
   os: "onionos"
 ---

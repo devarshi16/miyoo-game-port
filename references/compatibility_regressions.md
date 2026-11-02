@@ -20,6 +20,12 @@ Respect serialized camera culling masks. Reflection-camera-only light sprites dr
 
 An active corpse is not a living enemy. Edge indicators should use the original death state and effective activation, rather than infer life from sprite alpha. A live spawn can temporarily be transparent. Treat clustered-enemy disappearance as a separate report unless the same failure has actually reproduced.
 
+For intermittent visibility, capture the crowd, the same frame with one actor hidden, and the same actor alone with its peers hidden. Zero contributed pixels can be ordinary occlusion: the original Unity player also completely hid live ground enemies behind other enemies and walls. Check bodies and masks separately, and distinguish this control from reproducing a player's invisible-body report. Do not force opacity or reorder actors just because the crowd comparison is ambiguous.
+
+Pool reuse can preserve a terminal death sprite if the replacement engine never clears Animator state on GameObject deactivation. A verified Unity 2017 comparison reset a revived Troll to its default state; the adapter retained Die at normalized time above four and a 32-by-5-pixel terminal sprite. Reset evaluated state after disable callbacks and validate the same naturally dead actor through repeated original Pool calls. A new active alpha-1 renderer alone does not establish a normal body pose. Keep component-only disable semantics separate unless tested.
+
+A persistent replacement HUD must not inherit a transient announcement's fade alpha. Generate a local opaque text-settings copy while retaining the original tint and authoritative day formatter. Check days after the first announcement has faded, including pause and saved-game reload.
+
 ## Preserve semantics while optimizing
 
 Record a deterministic workload from a copied later-island save, not only a fresh start. Dense forests, groups of enemies and multiple repair/debris objects exercise different costs. Compare stock-clock frame windows and phase profiles; exclude boot from steady-state claims and label mute/fixed-timestep diagnostic runs.
@@ -31,3 +37,7 @@ Query semantics can differ: an existing point query used a cached registry but t
 For transform caches, test local/world writes, ancestor changes, identical writes, reparenting, clone initialization and inverse matrices. Descendant invalidation may avoid rechecking unrelated static forests after every moving body, but every hierarchy-write path must participate. Use randomized trees and fresh matrix composition as an independent oracle, then compare real-game screenshots and state.
 
 Keep optimizations and behavior repairs separable for measurement. An exact physics workload should retain positions, velocities, query counts and events; an intentional repair needs its own expected behavior and actual-game reproduction. Passing microbenchmarks does not establish a device FPS gain or a complete playthrough.
+
+Weather state can affect the economy even when its particles are cosmetic. Retain the original weather/season updates; a bounded presentation may read the current rain/snow intensity and wind without consuming the game's random generator. Use scaled time to freeze the effect during pause, and keep it below menus and HUD. Validate actual winter gameplay separately from a forced-snow rendering probe.
+
+Treat a native import header/index reader as a measured milestone, not a completed installer. Full first-launch preparation still needs build verification, streaming texture/audio/font conversion, pack parity, recoverable staging, an on-screen progress/error path, and an interrupted-import test. Never mark a partial stage ready or overwrite an existing pack/save on failure.
