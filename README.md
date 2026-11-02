@@ -1,6 +1,6 @@
 # Miyoo game port development skill
 
-Version 1.2.0. This repository supplies an agent workflow and development scaffolding. It is **not** an automatic game converter, a universal Unity runtime, or a guarantee that a named engine/game is portable.
+Version 1.2.1. This repository supplies an agent workflow and development scaffolding. It is **not** an automatic game converter, a universal Unity runtime, or a guarantee that a named engine/game is portable.
 
 Read [SKILL.md](SKILL.md) for the workflow and [hardware guidance](references/hardware_specs.md) before device work. [Engine strategies](references/engine_matrix.md) distinguish research options from implementations. REA is optional.
 
@@ -25,3 +25,5 @@ Install Pillow for the packer/screenshot helper and dnfile for Unity metadata he
 Run regressions with `python3 -m unittest discover -s tests -v`. Native template compilation, ABI validation, framebuffer initialization and platform recovery still need target-device validation in each concrete port. The November 2026 Kingdom audit is the source of several regression cases, not a certification that this generic backend has been exercised on every firmware.
 
 MIT license; see LICENSE.
+
+Compatibility lessons from actual port failures are collected in [compatibility regressions](references/compatibility_regressions.md): typed UI metadata, baked font units, camera layers, physical wheel hinges, enemy death state, and exact cache/query optimization tests.

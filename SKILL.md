@@ -2,7 +2,7 @@
 name: miyoo-game-port
 description: Assess and develop game ports for Miyoo Mini and Mini Plus on OnionOS, including engine compatibility, asset conversion, native rendering, packaging and hardware validation. Use for an actual porting or port-audit task; this skill is scaffolding, not an automatic converter or a guarantee that a game is portable.
 metadata:
-  version: "1.2.0"
+  version: "1.2.1"
   platform: "miyoo-mini-plus"
   os: "onionos"
 ---
@@ -32,6 +32,7 @@ Choose either Onion audio service/OSS integration or a deliberately managed dire
 3. Separate developer cross-compilation from player setup. Make device versus desktop output explicit. The build template requires an existing ARM game executable; it does not generate one. `templates/build/compile.sh --desktop` builds only the preview core. For device staging, follow that script's usage and supply its required executable, names and extracted assets.
 4. Keep source assets out of distributable archives. Validate required data/DLLs, source fingerprints, conversion counts, pack bounds and output checksums. Use fresh work directories and staged installation with rollback; preserve saves. Success means output validation passed, not merely a zero exit status from one subprocess.
 5. Add focused behavioral regressions for reproduced failures. Unity-style adapters need tests for coroutine phases/cancellation, effective activation, hierarchy/component cache invalidation, input edges, game/unscaled/wall clocks, save round trips and orderly exit. A zero-exception boot or visually correct screenshot does not prove gameplay equivalence.
+   For importer, font, camera, joint, and cache failures, consult [compatibility regressions](references/compatibility_regressions.md) before replacing original behavior with special cases.
 6. Build a versioned candidate from a clean checkout, recording source commit, toolchain and dependency versions, hashes and third-party notices. Test the **extracted release package** using the player route, not only the developer's SD directory.
 
 ## Device QA and performance
