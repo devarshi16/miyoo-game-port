@@ -2,7 +2,7 @@
 name: miyoo-game-port
 description: Assess and develop game ports for Miyoo Mini and Mini Plus on OnionOS, including engine compatibility, asset conversion, native rendering, packaging and hardware validation. Use for an actual porting or port-audit task; this skill is scaffolding, not an automatic converter or a guarantee that a game is portable.
 metadata:
-  version: "1.2.2"
+  version: "1.2.3"
   platform: "miyoo-mini-plus"
   os: "onionos"
 ---
@@ -42,6 +42,8 @@ Use an isolated test port and copied or fresh saves. Check the current state bef
 For screenshots, `scripts/raw_to_png.py` requires the actual dimensions, bit depth, stride and visible pan offset; rotate as appropriate. Reading a framebuffer for an occasional screenshot is different from reading uncached video memory in the render loop.
 
 Measure logic, rasterization, copy/conversion, vsync, allocations, total RSS and swap separately with fixed input/workloads. MI_GFX may accelerate presentation, but does not automatically accelerate the software renderer. Compare stock clocks before considering optional tuning. Do not promise an FPS gain before a device benchmark.
+
+Create isolated combat fixtures using the original spawn and attack paths when late-game performance is the problem. Record actual spawned counts and season state. Compare deterministic combat outcomes as well as FPS, then run ordinary real-time timing separately. See [compatibility regressions](references/compatibility_regressions.md) for query and importer checks learned from device failures.
 
 On-device source compilation is a separate toolchain/resource question from first-run asset conversion. A PC converter's peak memory does not prove every importer is impossible. For copy-paste installation research, prototype incremental metadata, texture and audio conversion with a measured memory budget, progress reporting and recovery after interruption; report unimplemented steps honestly.
 

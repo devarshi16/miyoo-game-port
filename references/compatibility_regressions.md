@@ -41,3 +41,19 @@ Keep optimizations and behavior repairs separable for measurement. An exact phys
 Weather state can affect the economy even when its particles are cosmetic. Retain the original weather/season updates; a bounded presentation may read the current rain/snow intensity and wind without consuming the game's random generator. Use scaled time to freeze the effect during pause, and keep it below menus and HUD. Validate actual winter gameplay separately from a forced-snow rendering probe.
 
 Treat a native import header/index reader as a measured milestone, not a completed installer. Full first-launch preparation still needs build verification, streaming texture/audio/font conversion, pack parity, recoverable staging, an on-screen progress/error path, and an interrupted-import test. Never mark a partial stage ready or overwrite an existing pack/save on failure.
+
+An upward collider cast can be a damage/interaction query with infinite distance. Do not shorten it because the caller looks like a ground check. Reuse scratch storage and reject only geometrically impossible candidates while preserving sorting, tied-hit order, result-buffer truncation, and same-frame movement behavior. Compare ordered hits, distances, normals and points against the prior implementation. A more elaborate spatial index may be slower on Cortex-A7; retain changes based on device measurements.
+
+Physics costs include candidate gathering and managed gameplay queries, not only integration. Lowering the physics frequency or removing coins can alter arrow hits, unit health and siege behavior. Prefer local hierarchy/attached-body invalidation to global invalidation caused by unrelated pooled actors. Verify activation, reparenting, body addition/destruction and clone/load initialization before relying on a cache.
+
+For deterministic combat comparisons, use an immutable copied save, seed, original spawn/charge APIs and the same timestep. Record hits, damage, live actors, projectile/coin counts, unit coin balances and objectives. If protecting a QA player to prevent game-over, disclose that intervention. A fixed-timestep speed comparison controls simulation work but does not establish interactive FPS. Forced winter rendering does not establish a complete winter playthrough.
+
+## First-launch installation
+
+Check Onion's outer shortcut presence guard: requiring the final converted pack prevents the importer from launching on a fresh card. Gate on a shipped launcher/importer file, then validate or prepare owned data inside that launcher.
+
+Reconstructing missing managed serialization layouts must inspect the owner's original metadata without executing the game. Resolve original Unity/game assemblies before the replacement engine in the working directory. Inspect dependencies' licenses before adopting code; a source-visible engine reference is not automatically redistributable. Generic engine schemas and licensed codec tables are distinct from extracted owner data.
+
+Keep public runtime integrity separate from the owned-data receipt so an engine update does not force conversion again. Verify the source DLLs and resource streams as well as serialized metadata. Reuse only staging outputs with matching source/build identity and output hashes. Use a process lock for both installation and startup recovery so a second launch cannot roll back an active transaction.
+
+Test interruption before every directory-activation boundary, completion recovery, a damaged cached output, missing/mixed runtime files, and save preservation. Save files belong outside replaceable directories. Keep rollback copies until validation passes. A progress display must remain responsive during native conversion, accept cancellation before commit, and finish a durable activation once it starts. Measure the complete path on the device, including RSS, swap, free space and elapsed time; report resumed versus fresh timings separately.
