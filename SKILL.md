@@ -2,7 +2,7 @@
 name: miyoo-game-port
 description: Assess and develop game ports for Miyoo Mini and Mini Plus on OnionOS, including engine compatibility, asset conversion, native rendering, packaging and hardware validation. Use for an actual porting or port-audit task; this skill is scaffolding, not an automatic converter or a guarantee that a game is portable.
 metadata:
-  version: "1.2.4"
+  version: "1.3.0"
   platform: "miyoo-mini-plus"
   os: "onionos"
 ---
@@ -17,13 +17,17 @@ Run `scripts/triage_game.py <game-directory>` as an inventory. It does not estab
 
 Record exact game build fingerprints, engine/API requirements, required native dependencies and licensing/provenance. For Unity, distinguish Mono IL from IL2CPP; finding a Managed directory alone is insufficient. Shader, physics, UI, input, serialization and lifecycle semantics can be gameplay-critical even in a visually simple game. Consult [engine strategies](references/engine_matrix.md) for bounded research options.
 
+Look for a compatible runtime before planning a native build. Minit shipped by patching an open GameMaker bytecode runner, with no native template, importer or engine rewrite. Pin the exact runner branch and commit, and sort its reported unknown functions into main-path gaps and platform stubs; a static grep of source or disassembly gave wrong answers there.
+
 ## Probe the target
 
 Read [hardware guidance](references/hardware_specs.md) before device integration. Inspect the actual Onion version, MemAvailable/swap, framebuffer fixed/variable info, pixel bitfields, active page, audio ownership, input mapping and dynamic ABI requirements. Historical measurements describe one workload/device, not universal limits.
 
 The native template supports **320×240 RGBA rendering → 640×480, 32-bit framebuffer, 2× rotation/scaling**. It validates that mode, uses the reported stride and restores the original pan. It is a starting backend without an audio implementation, pack reader or game runtime. Other modes need an explicit backend; fail clearly rather than writing an assumed layout.
 
-Choose either Onion audio service/OSS integration or a deliberately managed direct-MI backend. Match initialization, ownership and cleanup. Do not blindly kill audioserver or blindly leave it running with a competing direct backend. Restore the platform on exit and test a subsequently launched application.
+For a runtime with SDL support, probe `SDL_Init(VIDEO)` on the device before committing to a library. The audited sysroot's SDL2 has only a dummy video driver, while Onion's SDL 1.2 in `/customer/lib` worked and required no bundled library. Expect to check orientation on the first device run: the SDL 1.2 frame was upside down on a Mini Plus and needed 180° rotation in the backend.
+
+Choose either Onion audio service/OSS integration or a deliberately managed direct-MI backend. Match initialization, ownership and cleanup. Do not blindly kill audioserver or blindly leave it running with a competing direct backend. Restore the platform on exit and test a subsequently launched application. Onion's volume overlay depends on MI_AO and audioserver state, so test the volume keys as well as sound. See [hardware guidance](references/hardware_specs.md) for a direct MI_AO configuration that fixed tearing in Minit.
 
 ## Implement and verify
 
@@ -34,8 +38,17 @@ Choose either Onion audio service/OSS integration or a deliberately managed dire
 5. Add focused behavioral regressions for reproduced failures. Unity-style adapters need tests for coroutine phases/cancellation, effective activation, hierarchy/component cache invalidation, input edges, game/unscaled/wall clocks, save round trips and orderly exit. A zero-exception boot or visually correct screenshot does not prove gameplay equivalence.
    For importer, font, camera, joint, and cache failures, consult [compatibility regressions](references/compatibility_regressions.md) before replacing original behavior with special cases.
 6. Build a versioned candidate from a clean checkout, recording source commit, toolchain and dependency versions, hashes and third-party notices. Test the **extracted release package** using the player route, not only the developer's SD directory.
+7. For a runner that reads the owner's files directly, prefer a bring-your-own-data ZIP: runner, launcher, shortcut and an empty data folder, with no importer. Point the shortcut's `GameDataFile` at the shipped launcher so it can start and report missing files. Make the packaging script refuse any owned file in the archive. Check third-party test fixtures too, since upstream sources can carry their own game data.
+8. For a copyleft runner, ship the licence, pinned commit and complete patched source. Regenerate the patch at packaging time: a staged patch and player note went stale during Minit's development. Rebuild from that source and compare hashes with the shipped binary. Compiled-in paths and cached library lookups can change the bytes, so record the build folder and pin the library paths.
+9. Publishing a repository or release is the owner's decision. Ask for it directly, and have the exact commands ready in case the agent's permissions block it. Keep captures with game audio out of the repository and release.
 
 ## Device QA and performance
+
+Build debug output into the device build early, because a person is often the only observer of a running game. SSH can be unavailable while a Ports launch runs, and a run started over SSH with MainUI up can stall or lose audio, so it is not a substitute. Deploy at the Onion menu, ask the person to test a named behavior, then read logs after exit. Useful outputs are the last presented frame, room or scene changes with positions, and slow frames with their step time. Per-frame logging itself can cause FPS and sound dips: 430,000 renderer lines did in Minit, so remove it before judging performance.
+
+Never stop MainUI or audioserver by process name during probing. `pkill -f` on audioserver left audio down until a power cycle. Use Onion's own launch path or a power cycle. Probe for the device's address rather than trusting saved notes, and tell the person when Wi-Fi is the blocker instead of reporting a device result you did not get.
+
+Show progress through every long startup stage, because a black screen reads as a crash. Find each stall on the device before adding it to the bar. Map every button deliberately against the game's own prompts, and decide what Menu does early: replaying a game's own save-and-quit path is cheap, but it is not a suspend and must be described that way.
 
 Use an isolated test port and copied or fresh saves. Check the current state before launching; preserve services and settings used during QA and restore changes afterward. Standard Onion directory layout is `Roms/PORTS/Shortcuts/<Category>/<name>.port` plus `Roms/PORTS/Games/<dir>/`. A shortcut must reference real executable/data paths.
 

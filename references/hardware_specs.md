@@ -41,3 +41,15 @@ Before cutting visuals, verify both rendered cost and simulation work. A compati
 For dense decorative clouds/fog, inspect the original controller and external consumers before changing authored budgets. Apply a verified named-controller budget before initial spawning; retain material initialization and weather updates, and confirm zero-budget pools are actually empty. For opaque water fills, earlier hidden sprite pixels can be clipped only when later coverage is proven; restore full bounds for foreground/HUD work and compare complete command lists byte-for-byte. Small HUD text can cost more in managed/native calls than in pixels: reuse a tiny atlas and draw one quad per glyph, checking exact output and stable texture memory across count changes.
 
 A progress/indexing prototype can fit even when the old desktop converter does not. Measure its exact stage (hashing/indexing versus payload decoding), peak RSS and output parity on hardware; do not extrapolate a complete importer time or memory bound from index results.
+
+## Video and audio through a runtime
+
+Findings from the Minit port on one Mini Plus. Confirm them on the target.
+
+The Mini sysroot's SDL2 2.0.16 has only the `dummy` video driver, so `SDL_Init(VIDEO)` fails with "No available video device". The steward-fu SDL2 needs a 22 MB GLES library, which the Kingdom port rejected for memory. Onion's SDL 1.2 in `/customer/lib` opens 320x240 and carries its own MI display, GFX and audio drivers. Its frame was upside down, and a 15-bit lookup table rotating RGB555 by 180° in the backend was sufficient. It also prints a line per frame, so send stdout to `/dev/null`. Runtimes without a working GL path need their software renderer tested as a separate target.
+
+SDL 1.2 audio with `KillAudioserver=1` tore and left the volume keys dead, showing small unresponsive lines on the left of the screen. Keymon works through `/dev/mi_ao` and checks for `audioserver`. A direct MI_AO thread stopped the tearing, confirmed by ear on the device: 22050 Hz, stereo, 16-bit, 6 frames of 1024, blocking `MI_AO_SendFrame`, with a logged fallback to SDL if MI_AO fails to open. Link `-lmi_ao -lmi_sys` from the MI library folder with `--unresolved-symbols=ignore-in-shared-libs`, and preload `/config/lib/libcam_os_wrapper.so` in the launcher. Check the volume bar separately on each port.
+
+Stopping audioserver with `pkill -9 -f app/audioserver` broke restart with `MI_AO_SetPubAttr ... 0xa0052009`, because another process held MI_AO. Only a power cycle recovered it.
+
+The prebuilt compiler can be called directly with `--sysroot` through a CMake toolchain file when a toolchain wrapper points at a missing `/opt/prebuilt`.
