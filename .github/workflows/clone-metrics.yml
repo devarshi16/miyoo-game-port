@@ -1,0 +1,37 @@
+name: Update clone badges
+
+on:
+  schedule:
+    - cron: '23 5 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: clone-metrics
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Update traffic history and badges
+        env:
+          GH_TOKEN: ${{ secrets.TRAFFIC_READ_TOKEN }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo '::error::Add TRAFFIC_READ_TOKEN with repository Administration: read. See references/repository_metrics.md.'
+            exit 1
+          fi
+          python3 scripts/update_clone_metrics.py
+      - name: Commit the updated snapshot
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .github/metrics
+          if ! git diff --cached --quiet; then
+            git commit -m 'Update clone traffic badges'
+            git push
+          fi
