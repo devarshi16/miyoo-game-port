@@ -1,6 +1,6 @@
 # Compatibility failures worth distinguishing
 
-These checks come from reproduced Kingdom: New Lands adapter failures. Apply the relevant checks to another game; they do not establish general Unity compatibility.
+Most checks come from reproduced Kingdom: New Lands adapter failures; the small-screen layout section comes from the Balatro fork. Apply the relevant checks to another game; they do not establish general Unity compatibility.
 
 ## Import data by type, not field name
 
@@ -71,3 +71,11 @@ Compare with the renderer the device uses. A desktop GL build showed the same wr
 `game_restart` is not a way to exit. Minit's QUIT called it and restarted the game. Scope a device exit to the pause-menu caller so game-over and other restart paths keep working.
 
 Headless desktop runs may have no input focus, which re-pauses the game each frame and looks like a stuck menu. Run windowed or fix focus in the backend. Copy required loose files beside `data.win`: without Minit's localization CSV, every label reads `undefined`.
+
+## Small-screen layouts
+
+A rearranged layout moves boxes that the game still animates by itself. Balatro hid its shop by changing an alignment offset; the port pinned the shop every frame and skipped movement for settled boxes, so the panel stayed on screen behind opened packs. Respect the game's own hidden marker, snap the box after changing its offset, and add a replay that opens a pack.
+
+Effects sized for desktop boxes can overflow smaller ones. Balatro's square 2.5x2.5 flame sprite on a 2x1 box ran off the top of the screen on a smaller HUD box. Scale such sprites from the new box but keep their aspect ratio, because the shader's shape depends on it.
+
+Review hidden decorations against desktop before keeping them hidden: translucent area plates, card counts and the reward line were removed for space and left content floating. A translucent band behind a rearranged HUD reproduces a desktop sidebar's grouping.

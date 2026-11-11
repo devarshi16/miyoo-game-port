@@ -53,3 +53,16 @@ SDL 1.2 audio with `KillAudioserver=1` tore and left the volume keys dead, showi
 Stopping audioserver with `pkill -9 -f app/audioserver` broke restart with `MI_AO_SetPubAttr ... 0xa0052009`, because another process held MI_AO. Only a power cycle recovered it.
 
 The prebuilt compiler can be called directly with `--sysroot` through a CMake toolchain file when a toolchain wrapper points at a missing `/opt/prebuilt`.
+
+## Findings from the Balatro fork
+
+Findings from one Mini Plus on Onion 4.3.1-1. Confirm them on the target.
+
+- **Transfers:** Wi-Fi ran at about 13 KB/s, so a 4 MB runtime took minutes. Send it gzipped (`gzip -9 -c | ssh ... gunzip > new && mv`), and install large one-off data through the SD card in the PC.
+- **Toolchain without Docker:** the upstream build made static LuaJIT in an ARMv7 container. Zig 0.16 built it instead (`HOST_CC="zig cc -target x86-linux-musl"`, `CC="zig cc -target arm-linux-musleabihf -mcpu=cortex_a7"`). Clang emits `__floatdidf`-style helpers that GCC's `libgcc.a` did not resolve in the final link order, so a GCC-compiled shim forwarding to `__aeabi_*` went into the LuaJIT archive.
+- **Screenshots:** read `/sys/class/graphics/fb0/pan`, take that 640x480 page of `/dev/fb0` (stride 2560, BGRA), and rotate it 180°.
+- **Raster profiling:** a SIGPROF timer on the render thread, bucketing program counters and symbolising them with `nm` from the unstripped build, found a procedural background redraw taking about 70 ms. A fixed-point span fill cut it, and a half-resolution cache with a 2x upscale on copy cut it to a quarter again.
+- **Free effects:** darkening alternate rows inside the NEON framebuffer copy on the presenter thread added scanlines without touching the render thread.
+- **Frame-rate-dependent timing:** Balatro caps its smoothed dt at 0.1 s, so held D-pad repeat (0.3 s, then 0.1 s) ran about 3 times slower at 5 fps. Feeding held directions wall-clock time restored desktop timing. Check other dt-capped timers the same way.
+- **Governor:** the performance governor and selective LuaJIT JIT scopes made no measurable difference in that workload. Measure before assuming either helps.
+- **Button glyphs:** the Mini's face buttons follow SNES colours (A red, B yellow, X blue, Y green). Games usually show Xbox colours, so recolour or remap the glyph atlas.

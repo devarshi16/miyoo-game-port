@@ -2,7 +2,7 @@
 name: miyoo-game-port
 description: Assess and develop game ports for Miyoo Mini and Mini Plus on OnionOS, including engine compatibility, asset conversion, native rendering, packaging and hardware validation. Use for an actual porting or port-audit task; this skill is scaffolding, not an automatic converter or a guarantee that a game is portable.
 metadata:
-  version: "1.3.0"
+  version: "1.4.0"
   platform: "miyoo-mini-plus"
   os: "onionos"
 ---
@@ -18,6 +18,8 @@ Run `scripts/triage_game.py <game-directory>` as an inventory. It does not estab
 Record exact game build fingerprints, engine/API requirements, required native dependencies and licensing/provenance. For Unity, distinguish Mono IL from IL2CPP; finding a Managed directory alone is insufficient. Shader, physics, UI, input, serialization and lifecycle semantics can be gameplay-critical even in a visually simple game. Consult [engine strategies](references/engine_matrix.md) for bounded research options.
 
 Look for a compatible runtime before planning a native build. Minit shipped by patching an open GameMaker bytecode runner, with no native template, importer or engine rewrite. Pin the exact runner branch and commit, and sort its reported unknown functions into main-path gaps and platform stubs; a static grep of source or disassembly gave wrong answers there.
+
+If a community port already exists, read its licence and fork it before starting over. Balatro was improved as a GPL-3.0 fork. Review it against desktop on the device with the owner, because an existing port can run while dropping fidelity: Balatro's had a substituted font, hidden shop sign, static background, missing scanlines and Xbox-coloured button prompts. Keep the stock clock as the default and report overclocked results separately.
 
 ## Probe the target
 
@@ -45,6 +47,8 @@ Choose either Onion audio service/OSS integration or a deliberately managed dire
 ## Device QA and performance
 
 Build debug output into the device build early, because a person is often the only observer of a running game. SSH can be unavailable while a Ports launch runs, and a run started over SSH with MainUI up can stall or lose audio, so it is not a substitute. Deploy at the Onion menu, ask the person to test a named behavior, then read logs after exit. Useful outputs are the last presented frame, room or scene changes with positions, and slow frames with their step time. Per-frame logging itself can cause FPS and sound dips: 430,000 renderer lines did in Minit, so remove it before judging performance.
+
+When the owner allows on-device testing, a scripted run is possible without them: pause MainUI with `killall -STOP MainUI`, run the port's own launcher with autoplay or replay variables and a separate save folder, then `killall -CONT MainUI`. Writing a `cmd_to_run.sh` and killing MainUI did not launch the port on Onion 4.3.1. Replays can inject real button events by writing `input_event` records to `/dev/input/event0`, which exercises the kernel and evdev reader too. See [hardware guidance](references/hardware_specs.md) for slow Wi-Fi transfers and raster profiling.
 
 Never stop MainUI or audioserver by process name during probing. `pkill -f` on audioserver left audio down until a power cycle. Use Onion's own launch path or a power cycle. Probe for the device's address rather than trusting saved notes, and tell the person when Wi-Fi is the blocker instead of reporting a device result you did not get.
 
