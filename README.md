@@ -1,5 +1,10 @@
 # Miyoo game port development skill
 
+[![Clones this week](.github/metrics/clones-week.svg)](references/repository_metrics.md)
+[![Clones overall](.github/metrics/clones-overall.svg)](references/repository_metrics.md)
+
+GitHub-reported clones; week starts Monday (UTC). [Snapshot and update setup](references/repository_metrics.md).
+
 Version 1.4.0. This repository supplies an agent workflow and development scaffolding. It is **not** an automatic game converter, a universal Unity runtime, or a guarantee that a named engine/game is portable.
 
 Read [SKILL.md](SKILL.md) for the workflow and [hardware guidance](references/hardware_specs.md) before device work. [Engine strategies](references/engine_matrix.md) distinguish research options from implementations. REA is optional.
