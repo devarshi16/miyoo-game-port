@@ -5,7 +5,7 @@
 
 GitHub-reported clones; week starts Monday (UTC). [Snapshot and update setup](references/repository_metrics.md).
 
-Version 1.2.4. This repository supplies an agent workflow and development scaffolding. It is **not** an automatic game converter, a universal Unity runtime, or a guarantee that a named engine/game is portable.
+Version 1.4.0. This repository supplies an agent workflow and development scaffolding. It is **not** an automatic game converter, a universal Unity runtime, or a guarantee that a named engine/game is portable.
 
 Read [SKILL.md](SKILL.md) for the workflow and [hardware guidance](references/hardware_specs.md) before device work. [Engine strategies](references/engine_matrix.md) distinguish research options from implementations. REA is optional.
 
@@ -31,4 +31,4 @@ Run regressions with `python3 -m unittest discover -s tests -v`. Native template
 
 MIT license; see LICENSE.
 
-Compatibility lessons from actual port failures are collected in [compatibility regressions](references/compatibility_regressions.md): typed UI metadata, baked font units, camera layers, physical wheel hinges, enemy death state, and exact cache/query optimization tests.
+Compatibility lessons from actual port failures are collected in [compatibility regressions](references/compatibility_regressions.md): typed UI metadata, baked font units, camera layers, physical wheel hinges, enemy death state, exact cache/query optimization tests, and GameMaker runner semantics from the [Minit port](https://github.com/devarshi16/minit-miyoo).

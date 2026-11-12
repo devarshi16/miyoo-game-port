@@ -1,6 +1,6 @@
 # Compatibility failures worth distinguishing
 
-These checks come from reproduced Kingdom: New Lands adapter failures. Apply the relevant checks to another game; they do not establish general Unity compatibility.
+Most checks come from reproduced Kingdom: New Lands adapter failures; the small-screen layout section comes from the Balatro fork. Apply the relevant checks to another game; they do not establish general Unity compatibility.
 
 ## Import data by type, not field name
 
@@ -57,3 +57,25 @@ Reconstructing missing managed serialization layouts must inspect the owner's or
 Keep public runtime integrity separate from the owned-data receipt so an engine update does not force conversion again. Verify the source DLLs and resource streams as well as serialized metadata. Reuse only staging outputs with matching source/build identity and output hashes. Use a process lock for both installation and startup recovery so a second launch cannot roll back an active transaction.
 
 Test interruption before every directory-activation boundary, completion recovery, a damaged cached output, missing/mixed runtime files, and save preservation. Save files belong outside replaceable directories. Keep rollback copies until validation passes. A progress display must remain responsive during native conversion, accept cancellation before commit, and finish a durable activation once it starts. Measure the complete path on the device, including RSS, swap, free space and elapsed time; report resumed versus fresh timings separately.
+
+## GameMaker runner semantics
+
+These come from Minit on the Butterscotch runner. They show what an open runner may still get wrong; none of them establishes general GameMaker compatibility. The original copy crashed at launch on the development PC, so some behavior is inferred from game data and observed results rather than compared directly.
+
+Check save paths first. `json_decode` read non-string arguments unchecked and `json_encode` wrote structs as text, so the first save crashed and the next boot stalled. Test a full save, reload and boot cycle. A trailing NUL in a saved file can be correct: `buffer_string` writes one.
+
+A skipped room can be a collision bug. The runner's solid restore also undid a position set by code, so a player wrapped across a room edge returned outside the room and moved again next step. GameMaker's rule is that motion into a solid restores the previous position, while direct writes to x and y are not undone. Gating the restore on motion took 60 random desktop routes from 33 chained moves to 0, with no invalid moves. A position wrap at arrival had already hidden the symptom, so keep tracing past a first fix that works. Fuzz routes across seeds, and exclude death and respawn from invalid-move counts.
+
+Compare with the renderer the device uses. A desktop GL build showed the same wrong torch room as the device, which pointed away from the software renderer's real gaps. Read the blend factors the runtime actually logs rather than those inferred from disassembly: an assumed (5, 6) was (6, 5). The software renderer ignored `draw_set_blend_mode_ext`, and cleared surface pixels kept a white stored color, so the room came out fully bright. Implementing the color factors, and treating transparent pixels as black under that one darkness blend, matched a reference image and was confirmed on the device. Use a real reference image from the person, and test the effect moving with the player.
+
+`game_restart` is not a way to exit. Minit's QUIT called it and restarted the game. Scope a device exit to the pause-menu caller so game-over and other restart paths keep working.
+
+Headless desktop runs may have no input focus, which re-pauses the game each frame and looks like a stuck menu. Run windowed or fix focus in the backend. Copy required loose files beside `data.win`: without Minit's localization CSV, every label reads `undefined`.
+
+## Small-screen layouts
+
+A rearranged layout moves boxes that the game still animates by itself. Balatro hid its shop by changing an alignment offset; the port pinned the shop every frame and skipped movement for settled boxes, so the panel stayed on screen behind opened packs. Respect the game's own hidden marker, snap the box after changing its offset, and add a replay that opens a pack.
+
+Effects sized for desktop boxes can overflow smaller ones. Balatro's square 2.5x2.5 flame sprite on a 2x1 box ran off the top of the screen on a smaller HUD box. Scale such sprites from the new box but keep their aspect ratio, because the shader's shape depends on it.
+
+Review hidden decorations against desktop before keeping them hidden: translucent area plates, card counts and the reward line were removed for space and left content floating. A translucent band behind a rearranged HUD reproduces a desktop sidebar's grouping.
