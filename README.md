@@ -5,9 +5,9 @@
 
 GitHub-reported clones; week starts Monday (UTC). [Snapshot and update setup](references/repository_metrics.md).
 
-Version 1.4.0. This repository supplies an agent workflow and development scaffolding. It is **not** an automatic game converter, a universal Unity runtime, or a guarantee that a named engine/game is portable.
+Version 1.5.0. This repository supplies an agent workflow and development scaffolding. It is **not** an automatic game converter, a universal Unity runtime, or a guarantee that a named engine/game is portable.
 
-Read [SKILL.md](SKILL.md) for the workflow and [hardware guidance](references/hardware_specs.md) before device work. [Engine strategies](references/engine_matrix.md) distinguish research options from implementations. REA is optional.
+Read [SKILL.md](SKILL.md) for the workflow, [hardware guidance](references/hardware_specs.md) before device work, and [small-screen UI, controller and memory optimization](references/ui_layout_and_optimization.md) for text-heavy `640x480` layouts. [Engine strategies](references/engine_matrix.md) distinguish research options from implementations. REA is optional.
 
 Included helpers:
 
@@ -31,4 +31,4 @@ Run regressions with `python3 -m unittest discover -s tests -v`. Native template
 
 MIT license; see LICENSE.
 
-Compatibility lessons from actual port failures are collected in [compatibility regressions](references/compatibility_regressions.md): typed UI metadata, baked font units, camera layers, physical wheel hinges, enemy death state, exact cache/query optimization tests, and GameMaker runner semantics from the [Minit port](https://github.com/devarshi16/minit-miyoo).
+Compatibility lessons from actual port failures are collected in [compatibility regressions](references/compatibility_regressions.md): typed UI metadata, baked font units, camera layers, physical wheel hinges, enemy death state, exact cache/query optimization tests, GameMaker runner semantics from the [Minit port](https://github.com/devarshi16/minit-miyoo), and Bionic-on-glibc ELF loading, `640x480` proportion re-budgeting, `"STSR"` virtual-dimension downscaling, dual-core L2 band rasterization, and controller parity from the [Slay the Spire port](https://github.com/devarshi16/slay-the-spire-miyoo) (see also [UI layout and optimization](references/ui_layout_and_optimization.md)).
