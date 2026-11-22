@@ -17,16 +17,39 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Update traffic history and badges
+      - name: Check traffic token
+        id: token
         env:
           GH_TOKEN: ${{ secrets.TRAFFIC_READ_TOKEN }}
         run: |
-          if [ -z "$GH_TOKEN" ]; then
-            echo '::error::Add TRAFFIC_READ_TOKEN with repository Administration: read. See references/repository_metrics.md.'
+          # A missing, expired or under-scoped token should not fail the run
+          # (and email the owner every day). Skip with a visible warning instead.
+          code=000
+          if [ -n "$GH_TOKEN" ]; then
+            code=$(curl -s -o /dev/null -w '%{http_code}' \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H 'Accept: application/vnd.github+json' \
+              "https://api.github.com/repos/${{ github.repository }}/traffic/clones")
+          fi
+          if [ "$code" = 200 ]; then
+            echo 'usable=true' >> "$GITHUB_OUTPUT"
+          elif [ -z "$GH_TOKEN" ] || [ "$code" = 401 ] || [ "$code" = 403 ] || [ "$code" = 404 ]; then
+            msg="TRAFFIC_READ_TOKEN is missing, expired or lacks Administration: read (HTTP $code); badges not updated. GitHub keeps only 14 days of clone data, so renew it soon. See references/repository_metrics.md."
+            echo "::warning::$msg"
+            echo "### Clone badges not updated" >> "$GITHUB_STEP_SUMMARY"
+            echo "$msg" >> "$GITHUB_STEP_SUMMARY"
+            echo 'usable=false' >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::Unexpected HTTP $code from the traffic API"
             exit 1
           fi
-          python3 scripts/update_clone_metrics.py
+      - name: Update traffic history and badges
+        if: steps.token.outputs.usable == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.TRAFFIC_READ_TOKEN }}
+        run: python3 scripts/update_clone_metrics.py
       - name: Commit the updated snapshot
+        if: steps.token.outputs.usable == 'true'
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
